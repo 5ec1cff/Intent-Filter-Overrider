@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ifo</string>
+    <string name="module_desc">Intent Filter Overlay</string>
+</resources>

@@ -158,8 +158,11 @@ public class IFOManager {
         synchronized (mPMSLock) {
             try {
                 Logger.d("updating config");
+                Logger.d("removing old overrides");
+                var packagesToAdd = new ArraySet<String>();
                 for (var name : mOverridePackages) {
                     var p = mPMSPackages.get(name);
+                    packagesToAdd.add(name);
                     if (p == null) {
                         Logger.w(name + " does not exists, skip remove");
                         continue;
@@ -168,12 +171,11 @@ public class IFOManager {
                 }
                 mOverridePackages.clear();
                 mConfig = readConfigs();
-                var packages = new ArraySet<String>();
                 for (var c : mConfig.overrides.keySet()) {
-                    packages.add(c.getPackageName());
+                    packagesToAdd.add(c.getPackageName());
                 }
-                Logger.d("new packages: " + packages);
-                for (var name : packages) {
+                Logger.d("adding new overrides for packages: " + packagesToAdd);
+                for (var name : packagesToAdd) {
                     var p = mPMSPackages.get(name);
                     if (p == null) {
                         Logger.w(name + " does not exists, skip add");

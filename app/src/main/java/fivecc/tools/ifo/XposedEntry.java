@@ -1,96 +1,133 @@
 package fivecc.tools.ifo;
 
-import android.content.ComponentName;
-import android.content.IntentFilter;
-
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Collections;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.List;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class XposedEntry implements IXposedHookLoadPackage {
+    static class AndroidPackageProxy implements InvocationHandler {
+        Object mActivities;
+        Object mOrig;
+        AndroidPackageProxy(Object orig, Object newActivities) {
+            mOrig = orig;
+            mActivities = newActivities;
+        }
+        @Override
+        public Object invoke(Object o, Method method, Object[] objects) throws Throwable {
+            if ("getActivities".equals(method.getName())) {
+                return mActivities;
+            }
+            return method.invoke(mOrig, objects);
+        }
+    }
+
+    static Class<?> classParsedIntentInfo;
+    static Class<?> classParsedActivity;
+    static Field intentsField;
+
+    static abstract class MethodHook extends XC_MethodHook {
+        @Override
+        protected final void beforeHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                before(param);
+            } catch (Throwable t) {
+                Logger.e("error on hook before " + param.method.getName(), t);
+            }
+        }
+
+        @Override
+        protected final void afterHookedMethod(MethodHookParam param) throws Throwable {
+            try {
+                after(param);
+            } catch (Throwable t) {
+                Logger.e("error on hook after " + param.method.getName(), t);
+            }
+        }
+
+        protected void before(MethodHookParam param) throws Throwable {}
+        protected void after(MethodHookParam param) throws Throwable {}
+    }
+
     @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam param) throws Throwable {
+    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
         Logger.d("inject...");
-        if (!param.packageName.equals("android") || !param.processName.equals("android")) {
-            Logger.e("not target (" + param.packageName + "/" + param.processName + ")");
+        if (!lpparam.packageName.equals("android") || !lpparam.processName.equals("android")) {
+            Logger.e("not target (" + lpparam.packageName + "/" + lpparam.processName + ")");
             return;
         }
-        var classParsedIntentInfo = XposedHelpers.findClass("android.content.pm.parsing.component.ParsedIntentInfo", param.classLoader);
-        var intentsField = XposedHelpers.findField(
-                XposedHelpers.findClass("android.content.pm.parsing.component.ParsedActivity", param.classLoader),
+        classParsedIntentInfo = XposedHelpers.findClass("android.content.pm.parsing.component.ParsedIntentInfo", lpparam.classLoader);
+        intentsField = XposedHelpers.findField(
+                XposedHelpers.findClass("android.content.pm.parsing.component.ParsedActivity", lpparam.classLoader),
                 "intents"
         );
-        XposedHelpers.findAndHookMethod(
-                XposedHelpers.findClass("com.android.server.pm.parsing.PackageParser2", param.classLoader),
-                "parsePackage",
-                File.class,
-                int.class,
-                boolean.class,
-                new XC_MethodHook() {
+        classParsedActivity = XposedHelpers.findClass("android.content.pm.parsing.component.ParsedActivity", lpparam.classLoader);
+        XposedBridge.hookAllConstructors(
+                XposedHelpers.findClass("com.android.server.pm.PackageManagerService", lpparam.classLoader),
+                new MethodHook() {
                     @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        // ParsedPackage
-                        var p = param.getResult();
+                    protected void before(MethodHookParam param) throws Throwable {
+                        IFOManager.getInstance().beforePMSLoad(param.thisObject);
+                    }
+
+                    @Override
+                    protected void after(MethodHookParam param) throws Throwable {
+                        IFOManager.getInstance().afterPMSLoad(param.thisObject);
+                    }
+                }
+        );
+        var classComponentResolver = XposedHelpers.findClass("com.android.server.pm.ComponentResolver", lpparam.classLoader);
+        XposedBridge.hookAllMethods(
+                classComponentResolver,
+                "addActivitiesLocked",
+                new MethodHook() {
+                    @Override
+                    protected void before(MethodHookParam param) throws Throwable {
+                        // AndroidPackage
+                        var p = param.args[0];
                         if (p == null) return;
                         // List<ParsedActivity>
                         var activities = (List<?>) XposedHelpers.callMethod(p, "getActivities");
-                        if (activities == null) return;
-                        IFOConfig config = IFOManager.getInstance().getConfig();
-                        for (var activity: activities) {
-                            var cn = (ComponentName) XposedHelpers.callMethod(activity, "getComponentName");
-                            var override = config.overrides.get(cn);
-                            if (override == null) continue;
-                            Logger.d("overriding for activity " + cn);
-                            // List<ParsedIntentInfo>
-                            var intents = (List) XposedHelpers.getObjectField(activity, "intents");
-                            if (intents == null) intents = Collections.emptyList();
-                            var newIntents = new ArrayList<>();
-                            try {
-                                var intentsToRemove = new ArrayList<>();
-                                for (var remove : override.removes) {
-                                    int j = 0;
-                                    for (var i : intents) {
-                                        if (Utils.isIntentFilterMatch(remove, (IntentFilter) i)) {
-                                            Logger.d("removed:" + Utils.dumpIntentFilter((IntentFilter) i));
-                                            intentsToRemove.add(i);
-                                            j++;
-                                        }
-                                        if (j > 1) {
-                                            Logger.d("warning: multiple intent-filters matched to remove: " + remove);
-                                        }
-                                    }
-                                }
-                                Logger.d("remove " + intentsToRemove.size() + " intents for activity " + cn);
-                                for (var i : intents) {
-                                    if (!intentsToRemove.contains(i)) newIntents.add(i);
-                                }
-                                int n = 0;
-                                for (var add : override.adds) {
-                                    var intentInfo = XposedHelpers.newInstance(classParsedIntentInfo);
-                                    Utils.fillIntentFilter((IntentFilter) intentInfo, add);
-                                    newIntents.add(intentInfo);
-                                    n++;
-                                }
-                                Logger.d("added " + n + " intents for activity " + cn);
-                            } catch (Throwable t) {
-                                Logger.e("error occurred while overriding for " + cn, t);
-                                return;
-                            }
-                            Logger.d("final intents:");
-                            for (var i: newIntents) {
-                                Logger.d(Utils.dumpIntentFilter((IntentFilter) i));
-                            }
-                            try {
-                                intentsField.set(activity, newIntents);
-                            } catch (Throwable t) {
-                                Logger.e("failed to set", t);
-                            }
+                        if (activities == null || activities.isEmpty()) return;
+                        var list = IFOManager.getInstance().overrideForPackage(
+                                (String) XposedHelpers.callMethod(p, "getPackageName"),
+                                activities,
+                                false
+                        );
+                        if (list != null) {
+                            var handler = new AndroidPackageProxy(p, list);
+                            param.args[0] = Proxy.newProxyInstance(lpparam.classLoader, new Class<?>[] { XposedHelpers.findClass("com.android.server.pm.parsing.pkg.AndroidPackage", lpparam.classLoader) }, handler);
+                        }
+                    }
+                }
+        );
+        XposedBridge.hookAllMethods(
+                classComponentResolver,
+                "removeAllComponentsLocked",
+                new MethodHook() {
+                    @Override
+                    protected void before(MethodHookParam param) throws Throwable {
+                        // AndroidPackage
+                        var p = param.args[0];
+                        if (p == null) return;
+                        // List<ParsedActivity>
+                        var activities = (List<?>) XposedHelpers.callMethod(p, "getActivities");
+                        if (activities == null || activities.isEmpty()) return;
+                        var list = IFOManager.getInstance().overrideForPackage(
+                                (String) XposedHelpers.callMethod(p, "getPackageName"),
+                                activities,
+                                true
+                        );
+                        if (list != null) {
+                            var handler = new AndroidPackageProxy(p, list);
+                            param.args[0] = Proxy.newProxyInstance(lpparam.classLoader, new Class<?>[] { XposedHelpers.findClass("com.android.server.pm.parsing.pkg.AndroidPackage", lpparam.classLoader) }, handler);
                         }
                     }
                 }

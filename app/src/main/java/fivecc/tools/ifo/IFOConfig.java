@@ -2,13 +2,13 @@ package fivecc.tools.ifo;
 
 import android.content.ComponentName;
 import android.content.IntentFilter;
+import android.util.ArrayMap;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -75,7 +75,7 @@ public final class IFOConfig {
     }
 
     public IFOConfig() {
-        overrides = new HashMap<>();
+        overrides = new ArrayMap<>();
     }
 
     public void readFromXml(XmlPullParser parser) throws XmlPullParserException, IOException {
@@ -95,5 +95,9 @@ public final class IFOConfig {
                 overrides.put(o.activity, o);
             }
         }
+    }
+
+    public void merge(IFOConfig other) {
+        overrides.putAll(other.overrides);
     }
 }

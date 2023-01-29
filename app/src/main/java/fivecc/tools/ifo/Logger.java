@@ -20,4 +20,8 @@ public class Logger {
         // XposedBridge.log("[" + TAG + "] " + text);
         Log.e(TAG, text);
     }
+
+    public static void w(String text) {
+        Log.w(TAG, text);
+    }
 }

@@ -5,8 +5,8 @@ This Xposed Module allows you modify intent filters of activities.
 ## Usage
 
 1. Install and enable the module.  
-2. Edit `/data/system/ifo.xml` .    
-3. Reboot.  
+2. Create an xml file at `/data/system/ifo/` .  
+3. Write your override and save.  
 
 An example of `ifo.xml`:
 
@@ -28,7 +28,6 @@ An example of `ifo.xml`:
                 <cat name="android.intent.category.BROWSABLE" />
                 <auth host="music.163.com" />
                 <auth host="y.music.163.com" />
-                <auth host=".music.163.com" />
                 <scheme name="http" />
                 <scheme name="https" />
             </intent-filter>

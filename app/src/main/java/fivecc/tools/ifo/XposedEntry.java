@@ -96,8 +96,9 @@ public class XposedEntry implements IXposedHookLoadPackage {
                         // List<ParsedActivity>
                         var activities = (List<?>) XposedHelpers.callMethod(p, "getActivities");
                         if (activities == null || activities.isEmpty()) return;
+                        var packageName = (String) XposedHelpers.callMethod(p, "getPackageName");
                         var list = IFOManager.getInstance().overrideForPackage(
-                                (String) XposedHelpers.callMethod(p, "getPackageName"),
+                                packageName,
                                 activities,
                                 false
                         );
@@ -120,8 +121,9 @@ public class XposedEntry implements IXposedHookLoadPackage {
                         // List<ParsedActivity>
                         var activities = (List<?>) XposedHelpers.callMethod(p, "getActivities");
                         if (activities == null || activities.isEmpty()) return;
+                        var packageName = (String) XposedHelpers.callMethod(p, "getPackageName");
                         var list = IFOManager.getInstance().overrideForPackage(
-                                (String) XposedHelpers.callMethod(p, "getPackageName"),
+                                packageName,
                                 activities,
                                 true
                         );

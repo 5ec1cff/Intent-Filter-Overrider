@@ -12,7 +12,11 @@ import java.util.Iterator;
 import java.util.function.BiFunction;
 
 public class Utils {
-    private static <T> boolean allContains(@Nullable Iterator<T> from, @Nullable Iterator<T> to, @Nullable BiFunction<T, T, Boolean> equals) {
+    private static <T> boolean isInclude(
+            @Nullable Iterator<T> from,
+            @Nullable Iterator<T> to,
+            @Nullable BiFunction<T, T, Boolean> equalsFn
+    ) {
         if (from == null || !from.hasNext()) return true;
         if (to == null || !to.hasNext()) return false;
         var s = new ArrayList<T>();
@@ -21,7 +25,7 @@ public class Utils {
             boolean exists = false;
             var e1 = from.next();
             for (var e2 : s) {
-                if ((equals != null && equals.apply(e1, e2)) || (equals == null && e1 != null && e1.equals(e2))) {
+                if ((equalsFn != null && equalsFn.apply(e1, e2)) || (equalsFn == null && e1 != null && e1.equals(e2))) {
                     exists = true;
                     break;
                 }
@@ -35,13 +39,13 @@ public class Utils {
             = (e1, e2) -> TextUtils.equals(e1.getPath(), e2.getPath()) && e1.getType() == e2.getType();
 
     public static boolean isIntentFilterMatch(@NonNull IntentFilter from, @NonNull IntentFilter to) {
-        return allContains(from.actionsIterator(), to.actionsIterator(), null)
-                && allContains(from.categoriesIterator(), to.categoriesIterator(), null)
-                && allContains(from.typesIterator(), to.typesIterator(), null)
-                && allContains(from.authoritiesIterator(), to.authoritiesIterator(), null)
-                && allContains(from.schemesIterator(), to.schemesIterator(), null)
-                && allContains(from.pathsIterator(), to.pathsIterator(), PATTERN_MATCHER_EQUALS)
-                && allContains(from.schemeSpecificPartsIterator(), to.schemeSpecificPartsIterator(), PATTERN_MATCHER_EQUALS);
+        return isInclude(from.actionsIterator(), to.actionsIterator(), null)
+                && isInclude(from.categoriesIterator(), to.categoriesIterator(), null)
+                && isInclude(from.typesIterator(), to.typesIterator(), null)
+                && isInclude(from.authoritiesIterator(), to.authoritiesIterator(), null)
+                && isInclude(from.schemesIterator(), to.schemesIterator(), null)
+                && isInclude(from.pathsIterator(), to.pathsIterator(), PATTERN_MATCHER_EQUALS)
+                && isInclude(from.schemeSpecificPartsIterator(), to.schemeSpecificPartsIterator(), PATTERN_MATCHER_EQUALS);
     }
 
     public static void fillIntentFilter(IntentFilter dst, IntentFilter src) {

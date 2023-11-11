@@ -160,7 +160,7 @@ public class IFOManager {
                 Logger.d("updating config");
                 Logger.d("removing old overrides");
                 var packagesToAdd = new ArraySet<String>();
-                for (var name : mOverridePackages) {
+                for (var name : new ArraySet<>(mOverridePackages)) {
                     var p = mPMSPackages.get(name);
                     packagesToAdd.add(name);
                     if (p == null) {
@@ -236,10 +236,11 @@ public class IFOManager {
                 Logger.d("added " + n + " intents for activity " + cn);
                 if (intentsToRemove.size() > 0 || n > 0) {
                     useNewIntents = true;
+                    /*
                     Logger.d("final intents:");
                     for (var i : newIntents) {
                         Logger.d(Utils.dumpIntentFilter((IntentFilter) i));
-                    }
+                    }*/
                 }
             } catch (Throwable t) {
                 Logger.e("error occurred while overriding for " + cn, t);

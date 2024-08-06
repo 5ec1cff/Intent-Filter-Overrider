@@ -1,7 +1,7 @@
 package fivecc.tools.ifo;
 
 import android.content.ComponentName;
-import android.content.IntentFilter;
+import android.content.Intent;
 import android.os.FileObserver;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -18,9 +18,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import de.robv.android.xposed.XposedHelpers;
 
@@ -35,12 +35,14 @@ public class IFOManager {
     private boolean beforeCalled = false;
     private boolean afterCalled = false;
 
+    private Object mPMS;
     private Object mPMSLock;
     private Map mPMSPackages;
     private Object mComponentResolver;
     private RuleObserver mObserver;
-
-    private final Set<String> mOverridePackages = new ArraySet<>();
+    // on Android 14, ParsedActivity, ParsedIntentInfo, etc don't implement hashCode and equals
+    // so we need to cache those result so that we can remove them properly
+    private final Map<String, List> overrideCache = new HashMap<>();
 
     // https://android.googlesource.com/platform/frameworks/base/+/fe011e06b5f1caf35e87c43ce5306234914d5c8c/services/core/java/com/android/server/firewall/IntentFirewall.java
     private class RuleObserver extends FileObserver {
@@ -98,6 +100,7 @@ public class IFOManager {
         if (beforeCalled) throw new IllegalStateException("before has been called!");
         beforeCalled = true;
         mConfig = readConfigs();
+        mPMS = pms;
     }
 
     void afterPMSLoad(Object pms) {
@@ -151,6 +154,7 @@ public class IFOManager {
             }
             c.merge(config);
         }
+        Logger.d("read " + c.overrides.size() + " rules");
         return c;
     }
 
@@ -160,7 +164,7 @@ public class IFOManager {
                 Logger.d("updating config");
                 Logger.d("removing old overrides");
                 var packagesToAdd = new ArraySet<String>();
-                for (var name : new ArraySet<>(mOverridePackages)) {
+                for (var name : new ArraySet<>(overrideCache.keySet())) {
                     var p = mPMSPackages.get(name);
                     packagesToAdd.add(name);
                     if (p == null) {
@@ -169,7 +173,7 @@ public class IFOManager {
                     }
                     XposedHelpers.callMethod(mComponentResolver, "removeAllComponents", p, false);
                 }
-                mOverridePackages.clear();
+                overrideCache.clear();
                 mConfig = readConfigs();
                 for (var c : mConfig.overrides.keySet()) {
                     packagesToAdd.add(c.getPackageName());
@@ -181,7 +185,7 @@ public class IFOManager {
                         Logger.w(name + " does not exists, skip add");
                         continue;
                     }
-                    XposedHelpers.callMethod(mComponentResolver, "addAllComponents", p, false);
+                    XposedEntry.callAddAllComponents(mComponentResolver, p, mPMS);
                 }
             } catch (Throwable t) {
                 Logger.e("failed to update config", t);
@@ -190,6 +194,9 @@ public class IFOManager {
     }
 
     List overrideForPackage(String packageName, List activities, boolean isRemove) {
+        if (isRemove) {
+            return overrideCache.remove(packageName);
+        }
         var result = new ArrayList<>();
         int nOverride = 0;
         for (var activity : activities) {
@@ -210,8 +217,9 @@ public class IFOManager {
                 for (var remove : override.removes) {
                     int j = 0;
                     for (var i : intents) {
-                        if (Utils.isIntentFilterMatch(remove, (IntentFilter) i)) {
-                            Logger.d("removed:" + Utils.dumpIntentFilter((IntentFilter) i));
+                        var intentFilter = XposedEntry.getIntentFilterForInfo(i);
+                        if (Utils.isIntentFilterMatch(remove, intentFilter)) {
+                            Logger.d("removed:" + Utils.dumpIntentFilter(intentFilter));
                             intentsToRemove.add(i);
                             j++;
                         }
@@ -224,17 +232,16 @@ public class IFOManager {
                 for (var i : intents) {
                     if (!intentsToRemove.contains(i)) newIntents.add(i);
                 }
-                int n = 0;
                 for (var add : override.adds) {
                     var intentInfo = XposedHelpers.newInstance(
                             XposedEntry.classParsedIntentInfo
                     );
-                    Utils.fillIntentFilter((IntentFilter) intentInfo, add);
+                    Utils.fillIntentFilter(XposedEntry.getIntentFilterForInfo(intentInfo), add);
+                    XposedEntry.setIntentInfoHasDefault(intentInfo, add.hasCategory(Intent.CATEGORY_DEFAULT));
                     newIntents.add(intentInfo);
-                    n++;
                 }
-                Logger.d("added " + n + " intents for activity " + cn);
-                if (intentsToRemove.size() > 0 || n > 0) {
+                Logger.d("added " + override.adds.size() + " intents for activity " + cn);
+                if (!intentsToRemove.isEmpty() || !override.adds.isEmpty()) {
                     useNewIntents = true;
                     /*
                     Logger.d("final intents:");
@@ -260,11 +267,7 @@ public class IFOManager {
             }
         }
         if (nOverride > 0) {
-            if (isRemove) {
-                mOverridePackages.remove(packageName);
-            } else {
-                mOverridePackages.add(packageName);
-            }
+            overrideCache.put(packageName, result);
             return result;
         }
         return null;

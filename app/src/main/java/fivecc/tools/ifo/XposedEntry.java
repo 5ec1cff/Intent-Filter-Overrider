@@ -1,5 +1,7 @@
 package fivecc.tools.ifo;
 
+import android.content.IntentFilter;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -30,8 +32,13 @@ public class XposedEntry implements IXposedHookLoadPackage {
     }
 
     static Class<?> classParsedIntentInfo;
+    static boolean classParsedIntentInfoExtendsIntentFilter = false;
     static Class<?> classParsedActivity;
+    static Class<?> classAndroidPackage;
     static Field intentsField;
+    static ClassLoader classLoader;
+    static Method methodAddAllComponents;
+    static boolean newMethodAddAllComponents;
 
     static abstract class MethodHook extends XC_MethodHook {
         @Override
@@ -56,19 +63,31 @@ public class XposedEntry implements IXposedHookLoadPackage {
         protected void after(MethodHookParam param) throws Throwable {}
     }
 
+    private static Class<?> findClass(String ...names) throws ClassNotFoundException {
+        for (var name: names) {
+            try {
+                return XposedHelpers.findClass(name, classLoader);
+            } catch (XposedHelpers.ClassNotFoundError ignored) {
+
+            }
+        }
+        throw new ClassNotFoundException("class not found: " + String.join(",", names));
+    }
+
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
-        Logger.d("inject...");
         if (!lpparam.packageName.equals("android") || !lpparam.processName.equals("android")) {
-            Logger.e("not target (" + lpparam.packageName + "/" + lpparam.processName + ")");
+            // Logger.e("not target (" + lpparam.packageName + "/" + lpparam.processName + ")");
             return;
         }
-        classParsedIntentInfo = XposedHelpers.findClass("android.content.pm.parsing.component.ParsedIntentInfo", lpparam.classLoader);
-        intentsField = XposedHelpers.findField(
-                XposedHelpers.findClass("android.content.pm.parsing.component.ParsedActivity", lpparam.classLoader),
-                "intents"
-        );
-        classParsedActivity = XposedHelpers.findClass("android.content.pm.parsing.component.ParsedActivity", lpparam.classLoader);
+        Logger.i("IFO inject into android");
+        classLoader = lpparam.classLoader;
+        classParsedIntentInfo = findClass("com.android.internal.pm.pkg.component.ParsedIntentInfoImpl", "com.android.server.pm.pkg.component.ParsedIntentInfoImpl", "android.content.pm.parsing.component.ParsedIntentInfo");
+        classParsedIntentInfoExtendsIntentFilter = IntentFilter.class.isAssignableFrom(classParsedIntentInfo);
+        classParsedActivity = findClass("com.android.internal.pm.pkg.component.ParsedActivityImpl", "com.android.server.pm.pkg.component.ParsedActivityImpl", "android.content.pm.parsing.component.ParsedActivity");
+        intentsField = XposedHelpers.findField(classParsedActivity, "intents");
+        classAndroidPackage = findClass("com.android.server.pm.pkg.AndroidPackage", "com.android.server.pm.parsing.pkg.AndroidPackage");
+        var classComponentResolver = XposedHelpers.findClass("com.android.server.pm.resolution.ComponentResolver", lpparam.classLoader);
         XposedBridge.hookAllConstructors(
                 XposedHelpers.findClass("com.android.server.pm.PackageManagerService", lpparam.classLoader),
                 new MethodHook() {
@@ -83,15 +102,38 @@ public class XposedEntry implements IXposedHookLoadPackage {
                     }
                 }
         );
-        var classComponentResolver = XposedHelpers.findClass("com.android.server.pm.ComponentResolver", lpparam.classLoader);
-        XposedBridge.hookAllMethods(
-                classComponentResolver,
-                "addActivitiesLocked",
+        Method addActivitiesLocked = null;
+        Method removeAllComponentsLocked = null;
+        int addActivitiesLockedPackageIdx = -1;
+        int removeAllComponentsLockedPackageIdx = -1;
+        for (var m: classComponentResolver.getDeclaredMethods()) {
+            if ("addActivitiesLocked".equals(m.getName())) {
+                addActivitiesLocked = m;
+                var types = m.getParameterTypes();
+                for (var t: types) {
+                    addActivitiesLockedPackageIdx++;
+                    if (t.equals(classAndroidPackage)) break;
+                }
+            } else if ("removeAllComponentsLocked".equals(m.getName())) {
+                removeAllComponentsLocked = m;
+                var types = m.getParameterTypes();
+                for (var t: types) {
+                    removeAllComponentsLockedPackageIdx++;
+                    if (t.equals(classAndroidPackage)) break;
+                }
+            } else if ("addAllComponents".equals(m.getName())) {
+                methodAddAllComponents = m;
+                newMethodAddAllComponents = m.getParameterCount() == 4;
+            }
+        }
+        int finalAddActivitiesLockedPackageIdx = addActivitiesLockedPackageIdx;
+        XposedBridge.hookMethod(
+                addActivitiesLocked,
                 new MethodHook() {
                     @Override
                     protected void before(MethodHookParam param) throws Throwable {
                         // AndroidPackage
-                        var p = param.args[0];
+                        var p = param.args[finalAddActivitiesLockedPackageIdx];
                         if (p == null) return;
                         // List<ParsedActivity>
                         var activities = (List<?>) XposedHelpers.callMethod(p, "getActivities");
@@ -104,19 +146,19 @@ public class XposedEntry implements IXposedHookLoadPackage {
                         );
                         if (list != null) {
                             var handler = new AndroidPackageProxy(p, list);
-                            param.args[0] = Proxy.newProxyInstance(lpparam.classLoader, new Class<?>[] { XposedHelpers.findClass("com.android.server.pm.parsing.pkg.AndroidPackage", lpparam.classLoader) }, handler);
+                            param.args[finalAddActivitiesLockedPackageIdx] = Proxy.newProxyInstance(lpparam.classLoader, new Class<?>[] { classAndroidPackage }, handler);
                         }
                     }
                 }
         );
-        XposedBridge.hookAllMethods(
-                classComponentResolver,
-                "removeAllComponentsLocked",
+        int finalRemoveAllComponentsLockedPackageIdx = removeAllComponentsLockedPackageIdx;
+        XposedBridge.hookMethod(
+                removeAllComponentsLocked,
                 new MethodHook() {
                     @Override
                     protected void before(MethodHookParam param) throws Throwable {
                         // AndroidPackage
-                        var p = param.args[0];
+                        var p = param.args[finalRemoveAllComponentsLockedPackageIdx];
                         if (p == null) return;
                         // List<ParsedActivity>
                         var activities = (List<?>) XposedHelpers.callMethod(p, "getActivities");
@@ -129,10 +171,28 @@ public class XposedEntry implements IXposedHookLoadPackage {
                         );
                         if (list != null) {
                             var handler = new AndroidPackageProxy(p, list);
-                            param.args[0] = Proxy.newProxyInstance(lpparam.classLoader, new Class<?>[] { XposedHelpers.findClass("com.android.server.pm.parsing.pkg.AndroidPackage", lpparam.classLoader) }, handler);
+                            param.args[finalRemoveAllComponentsLockedPackageIdx] = Proxy.newProxyInstance(lpparam.classLoader, new Class<?>[] { classAndroidPackage }, handler);
                         }
                     }
                 }
         );
+    }
+
+    public static void callAddAllComponents(Object self, Object p, Object pms) throws Throwable {
+        if (newMethodAddAllComponents) {
+            methodAddAllComponents.invoke(self, p, false, XposedHelpers.getObjectField(pms, "mSetupWizardPackage"), XposedHelpers.callMethod(pms, "snapshotComputer"));
+        } else {
+            methodAddAllComponents.invoke(self, p, false);
+        }
+    }
+
+    public static IntentFilter getIntentFilterForInfo(Object info) {
+        if (classParsedIntentInfoExtendsIntentFilter) return (IntentFilter) info;
+        else return (IntentFilter) XposedHelpers.getObjectField(info, "mIntentFilter");
+    }
+
+    public static void setIntentInfoHasDefault(Object info, boolean has) {
+        if (classParsedIntentInfoExtendsIntentFilter) return;
+        XposedHelpers.callMethod(info, "setHasDefault", has);
     }
 }

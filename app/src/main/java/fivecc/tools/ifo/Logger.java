@@ -5,6 +5,11 @@ import de.robv.android.xposed.XposedBridge;
 public class Logger {
     private static final String TAG = "IFO";
 
+    public static void i(String text) {
+        XposedBridge.log("[" + TAG + "][I] " + text);
+        // Log.d(TAG, text);
+    }
+
     public static void d(String text) {
         XposedBridge.log("[" + TAG + "][D] " + text);
         // Log.d(TAG, text);

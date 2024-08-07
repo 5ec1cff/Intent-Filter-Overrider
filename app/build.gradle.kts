@@ -4,21 +4,21 @@ plugins {
 
 android {
     namespace = "fivecc.tools.ifo"
-    compileSdk = 33
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "fivecc.tools.ifo"
         minSdk = 30
-        targetSdk = 33
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // We don't need to do R8 since it is a really small module
+            isMinifyEnabled = false // true
+            // isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -30,9 +30,5 @@ android {
 
 dependencies {
     compileOnly("de.robv.android.xposed:api:82")
-    implementation("androidx.appcompat:appcompat:1.6.0")
-    implementation("com.google.android.material:material:1.7.0")
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    compileOnly("androidx.annotation:annotation:1.8.1")
 }

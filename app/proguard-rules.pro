@@ -20,7 +20,7 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
--keep class fivecc.tools.ifo.XposedEntry
+-keep class io.github.a13e300.tools.ifo.XposedEntry
 
 -repackageclasses
 -allowaccessmodification

@@ -1,4 +1,4 @@
-package fivecc.tools.ifo;
+package io.github.a13e300.tools.ifo;
 
 import android.content.IntentFilter;
 import android.os.PatternMatcher;

@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "fivecc.tools.ifo"
+    namespace = "io.github.a13e300.tools.ifo"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "fivecc.tools.ifo"
+        applicationId = "io.github.a13e300.tools.ifo"
         minSdk = 30
         targetSdk = 34
         versionCode = 1
